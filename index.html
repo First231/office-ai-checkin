@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Office AI Check-in System</title>
+    <!-- Import Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Import Face-API.js -->
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <!-- Font Awesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600&display=swap');
+
+        body {
+            font-family: 'Sarabun', sans-serif;
+            margin: 0;
+            overflow: hidden; /* Prevent scrolling from floating elements */
+            background: linear-gradient(135deg, #e0f7fa 0%, #ffebee 100%); /* Blue to Pale Red */
+        }
+
+        /* Mirrored Video Only - Canvas stays normal to keep text readable */
+        #video {
+            transform: scaleX(-1);
+            border-radius: 1rem;
+        }
+        
+        #overlay {
+            /* No transform here so text is readable */
+            border-radius: 1rem;
+        }
+
+        /* Glassmorphism Card */
+        .glass-card {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+        }
+
+        /* Floating Emojis Animation */
+        .floating-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            overflow: hidden;
+        }
+
+        .emoji-bg {
+            position: absolute;
+            font-size: 2rem;
+            opacity: 0.6;
+            animation: float 15s infinite linear;
+            user-select: none;
+        }
+
+        @keyframes float {
+            0% { transform: translateY(110vh) rotate(0deg); }
+            100% { transform: translateY(-10vh) rotate(360deg); }
+        }
+
+        /* Delay for each emoji to make it look random */
+        .emoji-bg:nth-child(1) { left: 10%; animation-duration: 12s; animation-delay: 0s; }
+        .emoji-bg:nth-child(2) { left: 20%; animation-duration: 15s; animation-delay: 2s; font-size: 3rem; }
+        .emoji-bg:nth-child(3) { left: 35%; animation-duration: 10s; animation-delay: 4s; }
+        .emoji-bg:nth-child(4) { left: 50%; animation-duration: 18s; animation-delay: 1s; font-size: 2.5rem; }
+        .emoji-bg:nth-child(5) { left: 65%; animation-duration: 14s; animation-delay: 3s; }
+        .emoji-bg:nth-child(6) { left: 80%; animation-duration: 16s; animation-delay: 5s; font-size: 3rem; }
+        .emoji-bg:nth-child(7) { left: 90%; animation-duration: 11s; animation-delay: 0s; }
+
+        .loader {
+            border-top-color: #3498db;
+            -webkit-animation: spinner 1.5s linear infinite;
+            animation: spinner 1.5s linear infinite;
+        }
+
+        @keyframes spinner {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Scrollbar for history */
+        .history-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+        .history-scroll::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+        }
+        .history-scroll::-webkit-scrollbar-thumb {
+            background: #888; 
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex items-center justify-center relative">
+
+    <!-- Floating Background -->
+    <div class="floating-bg">
+        <div class="emoji-bg">🏫</div>
+        <div class="emoji-bg">💻</div>
+        <div class="emoji-bg">📎</div>
+        <div class="emoji-bg">✏️</div>
+        <div class="emoji-bg">📅</div>
+        <div class="emoji-bg">☕</div>
+        <div class="emoji-bg">📊</div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="container mx-auto p-4 flex flex-col lg:flex-row gap-6 max-w-6xl z-10 h-[90vh]">
+        
+        <!-- Left Panel: Camera & Recognition -->
+        <div class="glass-card rounded-2xl p-6 flex-1 flex flex-col items-center relative shadow-xl overflow-hidden">
+            <h2 class="text-2xl font-bold text-gray-700 mb-4 flex items-center">
+                <i class="fas fa-camera mr-2 text-blue-500"></i> กล้องตรวจจับใบหน้า
+            </h2>
+            
+            <div class="relative w-full max-w-lg aspect-[4/3] bg-black rounded-2xl overflow-hidden shadow-inner border-4 border-white/50">
+                <video id="video" class="w-full h-full object-cover" autoplay muted></video>
+                <canvas id="overlay" class="absolute top-0 left-0 w-full h-full"></canvas>
+                
+                <!-- Loading Spinner -->
+                <div id="loading" class="absolute inset-0 flex flex-col items-center justify-center bg-white/90 z-20">
+                    <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-12 w-12 mb-4"></div>
+                    <p class="text-gray-600 font-semibold">กำลังโหลดโมเดล AI...</p>
+                </div>
+            </div>
+
+            <div class="mt-4 w-full max-w-lg">
+                <div id="status-msg" class="text-center p-2 rounded-lg bg-blue-100 text-blue-800 font-medium transition-all">
+                    รอการตรวจจับ...
+                </div>
+            </div>
+
+            <!-- Mode Switch -->
+            <div class="flex mt-6 bg-white/50 p-1 rounded-xl w-full max-w-xs">
+                <button onclick="setMode('login')" id="btn-mode-login" class="flex-1 py-2 rounded-lg text-sm font-bold transition-all bg-blue-500 text-white shadow-md">
+                    ลงชื่อเข้าใช้ (Auto)
+                </button>
+                <button onclick="setMode('register')" id="btn-mode-register" class="flex-1 py-2 rounded-lg text-sm font-bold transition-all text-gray-600 hover:bg-white/50">
+                    ลงทะเบียนใหม่
+                </button>
+            </div>
+
+            <!-- Registration Form (Hidden by default) -->
+            <div id="register-form" class="hidden mt-4 w-full max-w-xs animate-fade-in">
+                <div class="space-y-3">
+                    <input type="text" id="reg-name" placeholder="ชื่อ-นามสกุล" class="w-full px-4 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white/80">
+                    <button onclick="registerFace()" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg shadow transition-colors flex items-center justify-center gap-2">
+                        <i class="fas fa-user-plus"></i> บันทึกใบหน้า
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel: History Log -->
+        <div class="glass-card rounded-2xl p-6 w-full lg:w-96 flex flex-col shadow-xl">
+            <h2 class="text-2xl font-bold text-gray-700 mb-4 flex items-center justify-between">
+                <span><i class="fas fa-history mr-2 text-red-400"></i> ประวัติการเข้าใช้</span>
+                <button onclick="clearHistory()" class="text-xs text-red-500 hover:underline">ล้างประวัติ</button>
+            </h2>
+            
+            <div class="flex-1 overflow-y-auto history-scroll pr-2" id="history-list">
+                <!-- History Items will appear here -->
+                <div class="text-center text-gray-400 mt-10 text-sm">ยังไม่มีรายการเข้าใช้งาน</div>
+            </div>
+
+            <div class="mt-4 pt-4 border-t border-gray-200">
+                <div class="text-xs text-gray-500 text-center">
+                    ระบบ AI ตรวจจับอารมณ์และยืนยันตัวตนอัตโนมัติ
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed bottom-5 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-lg opacity-0 transition-opacity duration-300 pointer-events-none z-50">
+        ข้อความแจ้งเตือน
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const overlay = document.getElementById('overlay');
+        const statusMsg = document.getElementById('status-msg');
+        const loading = document.getElementById('loading');
+        const historyList = document.getElementById('history-list');
+        const registerForm = document.getElementById('register-form');
+        const regNameInput = document.getElementById('reg-name');
+        
+        let currentMode = 'login'; // 'login' or 'register'
+        let labeledFaceDescriptors = [];
+        let faceMatcher = null;
+        let isModelLoaded = false;
+        let lastLoggedTime = {}; // Debounce for login to prevent spamming
+
+        // Emotions Emoji Map
+        const emojiMap = {
+            neutral: '😐', happy: '😄', sad: '😢', angry: '😠', 
+            fearful: '😨', disgusted: '🤢', surprised: '😲'
+        };
+
+        // --- 1. Load Models & Start Video ---
+        Promise.all([
+            faceapi.nets.ssdMobilenetv1.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models'),
+            faceapi.nets.faceLandmark68Net.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models'),
+            faceapi.nets.faceRecognitionNet.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models'),
+            faceapi.nets.faceExpressionNet.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models')
+        ]).then(startVideo);
+
+        function startVideo() {
+            navigator.mediaDevices.getUserMedia({ video: {} })
+                .then(stream => {
+                    video.srcObject = stream;
+                    loadData(); // Load saved faces
+                })
+                .catch(err => {
+                    console.error("Camera Error:", err);
+                    showToast("ไม่สามารถเข้าถึงกล้องได้ โปรดตรวจสอบสิทธิ์");
+                });
+        }
+
+        video.addEventListener('play', () => {
+            loading.style.display = 'none';
+            isModelLoaded = true;
+            
+            setInterval(async () => {
+                if (!isModelLoaded || video.paused || video.ended) return;
+
+                // Adjust canvas to match video size dynamically
+                const displaySize = { width: video.offsetWidth, height: video.offsetHeight };
+                faceapi.matchDimensions(overlay, displaySize);
+
+                // Detect Faces
+                const detections = await faceapi.detectAllFaces(video, new faceapi.SsdMobilenetv1Options())
+                    .withFaceLandmarks()
+                    .withFaceExpressions()
+                    .withFaceDescriptors();
+
+                const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                
+                // Clear Canvas
+                const ctx = overlay.getContext('2d');
+                ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+                // Process Detections
+                resizedDetections.forEach(result => {
+                    const box = result.detection.box;
+                    
+                    // --- CRITICAL: MANUAL MIRRORING ---
+                    // Since video is CSS mirrored but canvas is NOT, we must mathematically flip the X coordinate
+                    // New X = Canvas Width - Old X - Box Width
+                    const mirroredX = displaySize.width - box.x - box.width;
+                    
+                    // Create a mirrored box object for drawing
+                    const mirroredBox = {
+                        x: mirroredX,
+                        y: box.y,
+                        width: box.width,
+                        height: box.height
+                    };
+
+                    // Determine Emotion
+                    const emotion = getDominantEmotion(result.expressions);
+                    const currentEmoji = emojiMap[emotion] || '😐';
+
+                    let labelText = "Unknown";
+                    let boxColor = 'rgba(100, 100, 100, 0.8)'; // Gray for unknown
+
+                    if (currentMode === 'login' && faceMatcher) {
+                        const bestMatch = faceMatcher.findBestMatch(result.descriptor);
+                        if (bestMatch.label !== 'unknown') {
+                            labelText = `${currentEmoji} ${bestMatch.label}`;
+                            boxColor = '#3b82f6'; // Blue for known
+                            handleAutoLogin(bestMatch.label, emotion);
+                        } else {
+                            labelText = `${currentEmoji} Unknown`;
+                        }
+                    } else if (currentMode === 'register') {
+                        labelText = `${currentEmoji} กำลังสแกน...`;
+                        boxColor = '#10b981'; // Green for register mode
+                    }
+
+                    // Custom Drawing
+                    const drawBox = new faceapi.draw.DrawBox(mirroredBox, { 
+                        label: labelText,
+                        lineWidth: 2,
+                        boxColor: boxColor,
+                        drawLabelOptions: {
+                            fontSize: 16,
+                            padding: 8
+                        }
+                    });
+                    drawBox.draw(overlay);
+                });
+                
+                // Update Status Text based on counts
+                if (resizedDetections.length === 0) {
+                     statusMsg.innerText = currentMode === 'login' ? "กำลังมองหาใบหน้า..." : "ไม่พบใบหน้า";
+                     statusMsg.className = "text-center p-2 rounded-lg bg-gray-100 text-gray-600 font-medium transition-all";
+                }
+
+            }, 100);
+        });
+
+        // --- 2. Registration Logic ---
+        async function registerFace() {
+            if (!regNameInput.value) {
+                showToast("กรุณากรอกชื่อ-นามสกุล");
+                return;
+            }
+
+            // Use detectSingleFace for registration to ensure we get the main face
+            const detection = await faceapi.detectSingleFace(video)
+                .withFaceLandmarks()
+                .withFaceDescriptor();
+
+            if (detection) {
+                const descriptor = detection.descriptor;
+                const name = regNameInput.value;
+
+                // Save to storage
+                saveFaceData(name, descriptor);
+                
+                showToast(`ลงทะเบียนคุณ ${name} สำเร็จ!`);
+                regNameInput.value = '';
+                setMode('login'); // Switch back to login
+            } else {
+                showToast("ไม่พบใบหน้า หรือตรวจจับไม่ชัดเจน");
+            }
+        }
+
+        // --- 3. Login Logic & History ---
+        function handleAutoLogin(name, emotion) {
+            const now = Date.now();
+            const cooldown = 5000; // 5 seconds cooldown
+
+            if (!lastLoggedTime[name] || (now - lastLoggedTime[name] > cooldown)) {
+                lastLoggedTime[name] = now;
+                
+                addHistoryItem(name, emojiMap[emotion] || '😐', emotion);
+                showToast(`ยินดีต้อนรับคุณ ${name} (${emotion})`);
+                
+                statusMsg.innerText = `ยืนยันตัวตนสำเร็จ: ${name}`;
+                statusMsg.className = "text-center p-2 rounded-lg bg-green-500 text-white font-medium transition-all shadow";
+            }
+        }
+
+        function getDominantEmotion(expressions) {
+            if(!expressions) return 'neutral';
+            return Object.keys(expressions).reduce((a, b) => expressions[a] > expressions[b] ? a : b);
+        }
+
+        function addHistoryItem(name, emoji, moodText) {
+            const time = new Date().toLocaleTimeString('th-TH');
+            const item = document.createElement('div');
+            item.className = "flex items-center p-3 mb-2 bg-white/60 rounded-xl border border-white/40 shadow-sm animate-fade-in";
+            item.innerHTML = `
+                <div class="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-xl mr-3 shadow-inner">
+                    ${emoji}
+                </div>
+                <div class="flex-1">
+                    <h3 class="font-bold text-gray-800 text-sm">${name}</h3>
+                    <p class="text-xs text-gray-500">อารมณ์: ${moodText}</p>
+                </div>
+                <div class="text-xs font-mono text-gray-400 bg-white/50 px-2 py-1 rounded">
+                    ${time}
+                </div>
+            `;
+            
+            // Remove "Empty" text if exists
+            if (historyList.children[0] && historyList.children[0].innerText === "ยังไม่มีรายการเข้าใช้งาน") {
+                historyList.innerHTML = '';
+            }
+
+            historyList.prepend(item);
+        }
+
+        // --- 4. Data Persistence (LocalStorage) ---
+        function saveFaceData(name, descriptor) {
+            let storedFaces = JSON.parse(localStorage.getItem('faces') || '[]');
+            
+            // Convert Float32Array to regular array for JSON storage
+            storedFaces.push({
+                label: name,
+                descriptor: Array.from(descriptor)
+            });
+
+            localStorage.setItem('faces', JSON.stringify(storedFaces));
+            loadData(); // Reload matcher
+        }
+
+        function loadData() {
+            const storedFaces = JSON.parse(localStorage.getItem('faces') || '[]');
+            
+            if (storedFaces.length > 0) {
+                labeledFaceDescriptors = storedFaces.map(f => {
+                    return new faceapi.LabeledFaceDescriptors(
+                        f.label,
+                        [new Float32Array(f.descriptor)] // Convert back to Float32Array
+                    );
+                });
+                faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.6);
+            }
+        }
+
+        function clearHistory() {
+            if(confirm("ต้องการล้างประวัติการเข้าใช้งานทั้งหมด?")) {
+                historyList.innerHTML = '<div class="text-center text-gray-400 mt-10 text-sm">ยังไม่มีรายการเข้าใช้งาน</div>';
+                lastLoggedTime = {}; // Reset cooldowns
+            }
+        }
+
+        // --- 5. UI Helpers ---
+        function setMode(mode) {
+            currentMode = mode;
+            const btnLogin = document.getElementById('btn-mode-login');
+            const btnRegister = document.getElementById('btn-mode-register');
+            
+            if (mode === 'login') {
+                registerForm.classList.add('hidden');
+                btnLogin.classList.add('bg-blue-500', 'text-white', 'shadow-md');
+                btnLogin.classList.remove('text-gray-600', 'hover:bg-white/50');
+                
+                btnRegister.classList.remove('bg-blue-500', 'text-white', 'shadow-md');
+                btnRegister.classList.add('text-gray-600', 'hover:bg-white/50');
+                
+                statusMsg.innerText = "พร้อมสแกนใบหน้าเข้างาน...";
+                statusMsg.className = "text-center p-2 rounded-lg bg-blue-100 text-blue-800 font-medium transition-all";
+            } else {
+                registerForm.classList.remove('hidden');
+                btnRegister.classList.add('bg-blue-500', 'text-white', 'shadow-md');
+                btnRegister.classList.remove('text-gray-600', 'hover:bg-white/50');
+
+                btnLogin.classList.remove('bg-blue-500', 'text-white', 'shadow-md');
+                btnLogin.classList.add('text-gray-600', 'hover:bg-white/50');
+                
+                statusMsg.innerText = "กรุณากรอกชื่อและมองกล้อง";
+                statusMsg.className = "text-center p-2 rounded-lg bg-yellow-100 text-yellow-800 font-medium transition-all";
+            }
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.innerText = message;
+            toast.style.opacity = '1';
+            setTimeout(() => {
+                toast.style.opacity = '0';
+            }, 3000);
+        }
+
+        // Add specific animation to css dynamically
+        const style = document.createElement('style');
+        style.innerHTML = `
+            @keyframes fade-in {
+                from { opacity: 0; transform: translateY(10px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            .animate-fade-in {
+                animation: fade-in 0.3s ease-out forwards;
+            }
+        `;
+        document.head.appendChild(style);
+
+    </script>
+</body>
+</html>
