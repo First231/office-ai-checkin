@@ -162,12 +162,12 @@
         <div class="glass-card rounded-2xl p-6 w-full lg:w-96 flex flex-col shadow-xl">
             <h2 class="text-2xl font-bold text-gray-700 mb-4 flex items-center justify-between">
                 <span><i class="fas fa-history mr-2 text-red-400"></i> ประวัติการเข้าใช้</span>
-                <button onclick="clearHistory()" class="text-xs text-red-500 hover:underline">ล้างประวัติ</button>
+                <button onclick="clearHistory()" class="text-xs text-red-500 hover:underline">ล้างทั้งหมด</button>
             </h2>
             
             <div class="flex-1 overflow-y-auto history-scroll pr-2" id="history-list">
                 <!-- History Items will appear here -->
-                <div class="text-center text-gray-400 mt-10 text-sm">ยังไม่มีรายการเข้าใช้งาน</div>
+                <div class="empty-msg text-center text-gray-400 mt-10 text-sm">ยังไม่มีรายการเข้าใช้งาน</div>
             </div>
 
             <div class="mt-4 pt-4 border-t border-gray-200">
@@ -358,7 +358,8 @@
         function addHistoryItem(name, emoji, moodText) {
             const time = new Date().toLocaleTimeString('th-TH');
             const item = document.createElement('div');
-            item.className = "flex items-center p-3 mb-2 bg-white/60 rounded-xl border border-white/40 shadow-sm animate-fade-in";
+            // Added 'group' class to handle hover effect for delete button
+            item.className = "history-item flex items-center p-3 mb-2 bg-white/60 rounded-xl border border-white/40 shadow-sm animate-fade-in group";
             item.innerHTML = `
                 <div class="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-xl mr-3 shadow-inner">
                     ${emoji}
@@ -367,17 +368,37 @@
                     <h3 class="font-bold text-gray-800 text-sm">${name}</h3>
                     <p class="text-xs text-gray-500">อารมณ์: ${moodText}</p>
                 </div>
-                <div class="text-xs font-mono text-gray-400 bg-white/50 px-2 py-1 rounded">
-                    ${time}
+                <div class="flex flex-col items-end gap-1">
+                    <span class="text-xs font-mono text-gray-400 bg-white/50 px-2 py-1 rounded">
+                        ${time}
+                    </span>
+                    <!-- Delete Button: Only shows on hover (opacity-0 -> group-hover:opacity-100) -->
+                    <button onclick="deleteHistoryItem(this)" class="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600 p-1" title="ลบรายการนี้">
+                        <i class="fas fa-trash-alt text-xs"></i>
+                    </button>
                 </div>
             `;
             
-            // Remove "Empty" text if exists
-            if (historyList.children[0] && historyList.children[0].innerText === "ยังไม่มีรายการเข้าใช้งาน") {
-                historyList.innerHTML = '';
+            // Remove "Empty" text if exists (check by class 'empty-msg')
+            const emptyMsg = historyList.querySelector('.empty-msg');
+            if (emptyMsg) {
+                emptyMsg.remove();
             }
 
             historyList.prepend(item);
+        }
+
+        function deleteHistoryItem(btn) {
+            // Find the closest parent div with class 'history-item'
+            const item = btn.closest('.history-item');
+            if (item) {
+                item.remove();
+                
+                // Check if list is empty after deletion
+                if (historyList.children.length === 0) {
+                     historyList.innerHTML = '<div class="empty-msg text-center text-gray-400 mt-10 text-sm">ยังไม่มีรายการเข้าใช้งาน</div>';
+                }
+            }
         }
 
         // --- 4. Data Persistence (LocalStorage) ---
@@ -410,7 +431,7 @@
 
         function clearHistory() {
             if(confirm("ต้องการล้างประวัติการเข้าใช้งานทั้งหมด?")) {
-                historyList.innerHTML = '<div class="text-center text-gray-400 mt-10 text-sm">ยังไม่มีรายการเข้าใช้งาน</div>';
+                historyList.innerHTML = '<div class="empty-msg text-center text-gray-400 mt-10 text-sm">ยังไม่มีรายการเข้าใช้งาน</div>';
                 lastLoggedTime = {}; // Reset cooldowns
             }
         }
